@@ -1,0 +1,11 @@
+c1: t1-c1, t4-c1
+c2: t2-c2, t1-c2
+c3: t3-c3, t2-c3
+c4: t4-c4, t3-c4
+t1: t1-c2, w-t1, t1-c1
+t2: t2-c3, w-t2, t2-c2
+t3: t3-c4, w-t3, t3-c3
+t4: t4-c1, w-t4, t4-c4
+w: w-t1, w-t2, w-t3, w-t4
+TOUT:
+ORDER: ((((((((c4,t3),c3),t4),w),t2),c1),t1),c2)
