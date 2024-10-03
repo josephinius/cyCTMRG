@@ -2,6 +2,8 @@ import cytnx
 import numpy as np
 import math
 
+EPS = 1.e-32
+
 
 """
 
@@ -203,58 +205,53 @@ def create_upper_half(c1, c2):
 
     """
 
-    # uh = np.tensordot(c2, c1, axes=([2, 3], [0, 1]))  # uh_{b j a i} = c2_{b j c k} * c1_{c k a i}
-    # return uh.reshape((np.prod(uh.shape[:2]), -1))  # uh_{(b j), (a i)}
-
     c1 = c1.relabels(["c", "k", "a", "i"])
     c2 = c2.relabels(["b", "j", "c", "k"])
-    res = cytnx.Contract(c1, c2)
+    res = cytnx.Contract(c2, c1)  # res_{bj;ai}
+    return res
+
+
+def create_lower_half(c3, c4):
+    """
+
+           a    i              j    b
+           |    |              |    |
+           |____|____......____|____|
+           |    |              |    |
+           |____|____......____|____|
+        C4                            C3
+
+    """
+
+    c3 = c3.relabels(["c", "k", "b", "j"])
+    c4 = c4.relabels(["a", "i", "c", "k"])
+    res = cytnx.Contract(c3, c4)  # res_{bj;ai}
     return res
 
 
 def create_projectors(c1, c2, c3, c4, dim_cut):
     upper_half = create_upper_half(c1, c2)
-    upper_half.print_diagram()
-    return None, None
-
-    # q, r_up = linalg.qr(upper_half)
-    _, r_up = linalg.qr(upper_half)
-    # _, s1, vt1 = linalg.svd(upper_half, lapack_driver='gesvd')  # use 'gesvd' or 'gesdd'
-    # print('s1.shape', s1.shape)
-    # print('v1.shape', vt1.shape)
-    # r_up = np.tensordot(np.diag(s1), vt1[:s1.shape[0], :], axes=(0, 0))
+    # upper_half.print_diagram()
+    _, r_up = cytnx.linalg.Qr(upper_half)
 
     lower_half = create_lower_half(c3, c4)
-    _, r_down = linalg.qr(lower_half)
-    # _, s2, vt2 = linalg.svd(lower_half, lapack_driver='gesvd')  # use 'gesvd' or 'gesdd'
-    # r_down = np.tensordot(np.diag(s2), vt2[:s2.shape[0], :], axes=(0, 0))
+    # lower_half.print_diagram()
+    _, r_down = cytnx.linalg.Qr(lower_half)
 
-    # print('r_up.shape', r_up.shape)
-    # print('r_down.shape', r_down.shape)
+    r_up.relabel_(0, "r1")
+    r_down.relabel_(0, "r2")
 
-    rr = np.tensordot(r_up, r_down, axes=(1, 1))
-    u, s, vt = linalg.svd(rr, lapack_driver='gesvd')  # use 'gesvd' or 'gesdd'
+    rr = cytnx.Contract(r_up, r_down).set_rowrank_(1)  # rr_{r1;r2}
+    s, u, vt = cytnx.linalg.Svd(rr)
+    print(s)
+    s, u, vt, s_err = cytnx.linalg.Svd_truncate(rr, keepdim=dim_cut, err=EPS, return_err=1)
+    print(s)
+    print("s_err: ", s_err)
+    u.print_diagram()
+    vt.print_diagram()
+    s.print_diagram()
 
-    # print('u', u.shape)
-    # print('s', s.shape)
-    # print('vt', vt.shape)
-    # print('s', s)
-
-    dim_new = min(s.shape[0], dim_cut)
-    lambda_new = []
-
-    for i, x in enumerate(s[:dim_new]):
-        if (x / s[0]) < EPS:
-            print(f's[{i}] too small: ', x)
-            # print('s too small')
-            # exit()
-            break
-        lambda_new.append(x)
-
-    dim_new = len(lambda_new)
-    lambda_new = np.array(lambda_new)
-
-    # print('np.diag(1 / np.sqrt(lambda_new))', np.diag(1 / np.sqrt(lambda_new)))
+    return None, None 
 
     # u = np.conj(u[:, :dim_new]) / np.sqrt(lambda_new)[None, :]
     u = np.tensordot(np.conj(u[:, :dim_new]), np.diag(1 / np.sqrt(lambda_new)), axes=(1, 0))
