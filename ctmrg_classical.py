@@ -242,31 +242,32 @@ def create_projectors(c1, c2, c3, c4, dim_cut):
     r_down.relabel_(0, "r2")
 
     rr = cytnx.Contract(r_up, r_down).set_rowrank_(1)  # rr_{r1;r2}
-    s, u, vt = cytnx.linalg.Svd(rr)
-    print(s)
+    # s, u, vt = cytnx.linalg.Svd(rr)
+    # print(s)
     s, u, vt, s_err = cytnx.linalg.Svd_truncate(rr, keepdim=dim_cut, err=EPS, return_err=1)
-    print(s)
-    print("s_err: ", s_err)
-    u.print_diagram()
-    vt.print_diagram()
-    s.print_diagram()
+    # print(s)
+    # print("s_err: ", s_err)
 
-    return None, None 
+    cytnx.Pow_(s, -1/2)
+    cytnx.Conj_(u)
 
-    # u = np.conj(u[:, :dim_new]) / np.sqrt(lambda_new)[None, :]
-    u = np.tensordot(np.conj(u[:, :dim_new]), np.diag(1 / np.sqrt(lambda_new)), axes=(1, 0))
+    u = cytnx.Contract(u, s)
 
-    # vt = np.conj(vt[:dim_new, :]) / np.sqrt(lambda_new)[:, None]
-    vt = np.tensordot(np.diag(1 / np.sqrt(lambda_new)), np.conj(vt[:dim_new, :]), axes=(0, 0))
+    cytnx.Conj_(vt)
+    vt = cytnx.Contract(s, vt)
 
-    upper_projector = np.tensordot(r_down, vt, axes=(0, 1))
-    lower_projector = np.tensordot(r_up, u, axes=(0, 0))
+    upper_projector = cytnx.Contract(r_down, vt).set_rowrank_(2)  # _{a,i;_aux_L}
+    lower_projector = cytnx.Contract(r_up, u).set_rowrank_(2)  # _{a,i;_aux_R}
 
-    # print('upper_projector', upper_projector)
-    # TODO: check Refs. [7] and [8] !
-    # a = np.tensordot(upper_projector, lower_projector, axes=(1, 1))
-    # print('a.shape', a.shape)
-    # print(a)  # should be approximately an identity
+    upper_projector.relabel_("_aux_L", "_aux_")
+    lower_projector.relabel_("_aux_R", "_aux_")
+
+    # lower_projector.relabel_("a", "b")
+    # lower_projector.relabel_("i", "j")
+    # test = cytnx.Contract(upper_projector, lower_projector)
+    # test.print_diagram()
+    # test = test.reshape(4, 4).set_rowrank(1)
+    # print(test)  # should be close to identity 
 
     return upper_projector, lower_projector
 
@@ -295,8 +296,6 @@ def extension_and_renormalization(dim, weight, corners, transfer_matrices):
         corners_extended.append(corner_extension(c, tm1, tm2, weight))
 
     p_up, p_down = create_projectors(*corners_extended, dim)
-
-
 
 
 if __name__ == '__main__':
