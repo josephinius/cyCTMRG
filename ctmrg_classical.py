@@ -229,6 +229,59 @@ def create_lower_half(c3, c4):
     return res
 
 
+def extend_corner1(c1, t1, p_up):
+    """
+    Returns extended and renormalized corner matrix c1.
+    """
+
+    net = cytnx.Network()
+    net.FromString(["c1: t1-c1, p-c1",
+                    "t1: a, p-t1, t1-c1",
+                    "p_up: p-c1, p-t1, b",
+                    "TOUT: a;b"])
+    net.setOrder(contract_order = "((c1, t1),p_up)")
+    net.PutUniTensor("c1", c1)
+    net.PutUniTensor("t1", t1)
+    net.PutUniTensor("p_up", p_up)
+    return net.Launch()
+
+
+def extend_corner4(c4, t3, p_down):
+    """
+    Returns extended and renormalized corner matrix c4.
+    """
+
+    net = cytnx.Network()
+    net.FromString(["c4: p-c4, t3-c4",
+                    "t3: t3-c4, p-t3, b",
+                    "p_down: p-c4, p-t3, a",
+                    "TOUT: a;b"])
+    net.setOrder(contract_order = "((c4,t3),p_down)")
+    net.PutUniTensor("c4", c4)
+    net.PutUniTensor("t3", t3)
+    net.PutUniTensor("p_down", p_down)
+    return net.Launch()
+
+
+def extend_tm(t4, weight, p_down, p_up):
+    """
+    Returns extended and renormalized transfer matrix t4. 
+    """
+
+    net = cytnx.Network()
+    net.FromString(["t4: pd-t, w-t, pu-t",
+                    "w: pd-w, j, pu-w, w-t",
+                    "p_down: pd-t, pd-w, a",
+                    "p_up: pu-t, pu-w, b",
+                    "TOUT: a, j, b"])
+    net.setOrder(contract_order = "(((t4,p_down),w),p_up)")
+    net.PutUniTensor("t4", t4)
+    net.PutUniTensor("w", weight)
+    net.PutUniTensor("p_down", p_down)
+    net.PutUniTensor("p_up", p_up)
+    return net.Launch()
+
+
 def create_projectors(c1, c2, c3, c4, dim_cut):
     upper_half = create_upper_half(c1, c2)
     # upper_half.print_diagram()
@@ -296,6 +349,10 @@ def extension_and_renormalization(dim, weight, corners, transfer_matrices):
         corners_extended.append(corner_extension(c, tm1, tm2, weight))
 
     p_up, p_down = create_projectors(*corners_extended, dim)
+
+    c1 = extend_corner1(c1, t1, p_up)
+    c4 = extend_corner4(c4, t3, p_down)
+    t4 = extend_tm(t4, weight, p_down, p_up)
 
 
 if __name__ == '__main__':
