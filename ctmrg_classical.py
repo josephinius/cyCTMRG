@@ -379,7 +379,7 @@ def ctmrg_iteration(corners, tms, weight, imp, num_of_steps="inf"):
 
     i = 0 
 
-    while (i < 10 or abs(mag - mag_new) > 1.e-14) if (num_of_steps == "inf") else (i < num_of_steps):
+    while (i < 10 or abs(mag - mag_new) > 1.e-12) if (num_of_steps == "inf") else (i < num_of_steps):
         corners, tms = extension_and_renormalization(dim, weight, corners, tms)
 
         for j in range(4):
@@ -393,20 +393,14 @@ def ctmrg_iteration(corners, tms, weight, imp, num_of_steps="inf"):
             tms[j] = t / norm.item()
 
         mag_new = mag
-        mag = measurement(corners, tms, w, imp).item()
+        mag = measurement(corners, tms, weight, imp).item()
         print(i, mag)
         i += 1
 
     return mag_new, i
 
 
-if __name__ == '__main__':
-    dim = 100
-    temperature = 3.
-    field_global = 0.
-    field_boundary = 1.e-0
-    field_corner = 1.e-0
-    j_x, j_y = 1., 1. 
+def initialize_tensors(temperature, field_global, field_boundary, field_corner, j_x, j_y):
     jw = (j_y, j_x, j_y, j_x)
     w = initialize_local_tensor(temperature, field_global, *jw)
     imp = initialize_imp_tensor(temperature, field_global, *jw)
@@ -433,7 +427,29 @@ if __name__ == '__main__':
     corners = (c1, c2, c3, c4)
     tms = (t1, t2, t3, t4)
 
-    # mag = measurement(corners, tms, w, imp)
-    # print("mag: ", mag)
+    return corners, tms, w, imp
 
-    ctmrg_iteration(corners, tms, w, imp)
+
+if __name__ == '__main__':
+    dim = 24
+    field_global = 1.e-14
+    field_boundary = 1.e-1
+    field_corner = 1.e-0
+    j_x, j_y = 1., 1. 
+
+    start_val = 2.00
+    end_val = 2.27
+    num = 28
+
+    file_name = f"data_{dim}.txt"
+
+    with open(file_name, 'w') as f:
+        f.write(f'# Ising model\n')
+        f.write('# D=%d, h_global=%E, h_boundary=%E, h_corner=%E, jx=%E, jy=%E\n' % (dim, field_global, field_boundary, field_corner, j_x, j_y))
+        f.write('# temp\t\t\t\tmag\t\t\t\t\titer\n')
+
+    for temperature in np.linspace(start_val, end_val, num=num, endpoint=True):
+        corners, tms, w, imp = initialize_tensors(temperature, field_global, field_boundary, field_corner, j_x, j_y)
+        mag, iter_count = ctmrg_iteration(corners, tms, w, imp)
+        with open(file_name, 'a') as f:
+            f.write('%.15f\t%.15f\t%d\n' % (temperature, mag, iter_count))
