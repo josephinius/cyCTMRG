@@ -325,7 +325,13 @@ def create_projectors(c1, c2, c3, c4, dim_cut):
     return upper_projector, lower_projector
 
 
-def extension_and_renormalization(dim, weight, corners, transfer_matrices):
+def tuple_rotation(x1, x2, x3, x4):
+    """Returns new tuple shifted to left by one place."""
+
+    return x2, x3, x4, x1
+
+
+def extension_and_renormalization(dim, weight, corners, transfer_matrices, rotate=True):
     """Returns corners and transfer matrices extended (and projected) by one iterative CTMRG step. Here, one step of
     CTMRG consists of repeating four times following two steps:
         (1) introducing additional column to system;
@@ -335,32 +341,71 @@ def extension_and_renormalization(dim, weight, corners, transfer_matrices):
     c1, c2, c3, c4 = corners
     t1, t2, t3, t4 = transfer_matrices
 
-    corners_extended = []
+    for _ in range(4):
 
-    for i in range(4):
-        weight = weight_rotate(weight)
-        c = corners[i]
-        tm1 = transfer_matrices[i]
-        tm2 = transfer_matrices[(i + 3) % 4]
-        # print(f"corner c[{i+1}] extension...")
-        # print(f"tm1 - {i + 1}")
-        # print(f"tm2 - {(i + 3) % 4 + 1}")
-        # weight.print_diagram()
-        corners_extended.append(corner_extension(c, tm1, tm2, weight))
+        corners_extended = []
 
-    p_up, p_down = create_projectors(*corners_extended, dim)
+        for i in range(4):
+            weight = weight_rotate(weight)
+            c = corners[i]
+            tm1 = transfer_matrices[i]
+            tm2 = transfer_matrices[(i + 3) % 4]
+            # print(f"corner c[{i+1}] extension...")
+            # print(f"tm1 - {i + 1}")
+            # print(f"tm2 - {(i + 3) % 4 + 1}")
+            # weight.print_diagram()
+            corners_extended.append(corner_extension(c, tm1, tm2, weight))
 
-    c1 = extend_corner1(c1, t1, p_up)
-    c4 = extend_corner4(c4, t3, p_down)
-    t4 = extend_tm(t4, weight, p_down, p_up)
+        p_up, p_down = create_projectors(*corners_extended, dim)
+
+        c1 = extend_corner1(c1, t1, p_up)
+        c4 = extend_corner4(c4, t3, p_down)
+        t4 = extend_tm(t4, weight, p_down, p_up)
+
+        if rotate:
+            c1, c2, c3, c4 = tuple_rotation(c1, c2, c3, c4)
+            t1, t2, t3, t4 = tuple_rotation(t1, t2, t3, t4)
+            transfer_matrices = t1, t2, t3, t4
+            corners = c1, c2, c3, c4
+            weight = weight_rotate(weight)
+
+    return [c1, c2, c3, c4], [t1, t2, t3, t4]
+
+
+def ctmrg_iteration(corners, tms, weight, imp, num_of_steps="inf"):
+    
+    mag = 0
+    mag_new = -1
+
+    i = 0 
+
+    while (i < 10 or abs(mag - mag_new) > 1.e-14) if (num_of_steps == "inf") else (i < num_of_steps):
+        corners, tms = extension_and_renormalization(dim, weight, corners, tms)
+
+        for j in range(4):
+            c = corners[j]
+            abs_tensor = cytnx.linalg.Abs(c.get_block())
+            norm = cytnx.linalg.Max(abs_tensor)
+            corners[j] = c / norm.item()
+            t = tms[j]
+            abs_tensor = cytnx.linalg.Abs(t.get_block())
+            norm = cytnx.linalg.Max(abs_tensor)
+            tms[j] = t / norm.item()
+
+        mag_new = mag
+        mag = measurement(corners, tms, w, imp).item()
+        print(i, mag)
+        i += 1
+
+    return mag_new, i
 
 
 if __name__ == '__main__':
-    dim = 7
-    temperature = 1.
+    dim = 100
+    temperature = 3.
     field_global = 0.
-    field_boundary = 1.e-14
-    field_corner = 1.e-14
+    field_boundary = 1.e-0
+    field_corner = 1.e-0
     j_x, j_y = 1., 1. 
     jw = (j_y, j_x, j_y, j_x)
     w = initialize_local_tensor(temperature, field_global, *jw)
@@ -388,9 +433,7 @@ if __name__ == '__main__':
     corners = (c1, c2, c3, c4)
     tms = (t1, t2, t3, t4)
 
-    mag = measurement(corners, tms, w, imp)
+    # mag = measurement(corners, tms, w, imp)
     # print("mag: ", mag)
 
-    extension_and_renormalization(dim, w, corners, tms)
-
-
+    ctmrg_iteration(corners, tms, w, imp)
