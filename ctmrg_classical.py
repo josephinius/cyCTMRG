@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0,'/home/manuel/cytnx/Cytnx_lib')
 import cytnx
 import numpy as np
 import math
@@ -372,7 +374,7 @@ def extension_and_renormalization(dim, weight, corners, transfer_matrices, rotat
     return [c1, c2, c3, c4], [t1, t2, t3, t4]
 
 
-def ctmrg_iteration(corners, tms, weight, imp, num_of_steps="inf"):
+def ctmrg_iteration(dim, corners, tms, weight, imp, num_of_steps="inf"):
     
     mag = 0
     mag_new = -1
@@ -450,6 +452,6 @@ if __name__ == '__main__':
 
     for temperature in np.linspace(start_val, end_val, num=num, endpoint=True):
         corners, tms, w, imp = initialize_tensors(temperature, field_global, field_boundary, field_corner, j_x, j_y)
-        mag, iter_count = ctmrg_iteration(corners, tms, w, imp)
+        mag, iter_count = ctmrg_iteration(dim, corners, tms, w, imp)
         with open(file_name, 'a') as f:
             f.write('%.15f\t%.15f\t%d\n' % (temperature, mag, iter_count))
