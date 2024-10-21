@@ -46,7 +46,97 @@ def create_ten(temperature, field, x, Lx, y, Ly, *j):
     return ten
 
 
-# TODO: implement CTMRG class and move the initialization of CTM tensors inside 
+class CTMRG(object):
+    """An implementation of Corner Transfer Matrix Renormalisation Group (CTMRG) algorithm."""
+
+    def __init__(self, chi, weights):
+        self.chi = chi
+        self.D = weights[0, 0].shape()[0]  # Assuming dimensions for each weigth tensor to be same
+        self.Lx = weights.shape[0]
+        self.Ly = weights.shape[1]
+        self.weights = weights
+
+        corner1 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+        corner2 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+        corner3 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+        corner4 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+
+        edge1 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+        edge2 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+        edge3 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+        edge4 = np.empty([self.Lx, self.Ly], dtype=cytnx.UniTensor)
+
+        xi_start = 1
+
+        corner_links = [cytnx.Bond(dim=xi_start), cytnx.Bond(dim=xi_start)]
+        edge_links = [cytnx.Bond(dim=xi_start), cytnx.Bond(dim=D), cytnx.Bond(dim=xi_start)] 
+        
+        for x in range(Lx):
+            for y in range(Ly):
+
+                corner1[x, y] = cytnx.UniTensor(
+                    bonds=corner_links,
+                    labels=[f"ctmrg_x{(x+1) % Lx}_y{y}_1", f"ctmrg_x{x}_y{y}_4"], 
+                    name=f"c1_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(corner1[x, y],mean=0,std=1)
+
+                corner2[x, y] = cytnx.UniTensor(
+                    bonds=corner_links,
+                    labels=[f"ctmrg_x{x}_y{y}_2", f"ctmrg_x{x}_y{y}_1"], 
+                    name=f"c2_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(corner2[x, y],mean=0,std=1)
+
+                corner3[x, y] = cytnx.UniTensor(
+                    bonds=corner_links,
+                    labels=[f"ctmrg_x{x}_y{y}_3", f"ctmrg_x{x}_y{(y+1) % Ly}_2"], 
+                    name=f"c3_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(corner3[x, y],mean=0,std=1)
+
+                corner4[x, y] = cytnx.UniTensor(
+                    bonds=corner_links,
+                    labels=[f"ctmrg_x{x}_y{(y+1) % Ly}_4", f"ctmrg_x{(x+1) % Lx}_y{y}_3"], 
+                    name=f"c4_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(corner4[x, y],mean=0,std=1)
+
+                edge1[x, y] = cytnx.UniTensor(
+                    bonds=edge_links,
+                    labels=[f"ctmrg_x{(x+1) % Lx}_y{y}_1", f"bond_x{x}_y{y}_y", f"ctmrg_x{x}_y{y}_1"],
+                    name=f"t1_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(edge1[x, y],mean=0,std=1)
+
+                edge2[x, y] = cytnx.UniTensor(
+                    bonds=edge_links,
+                    labels=[f"ctmrg_x{x}_y{y}_2", f"bond_x{x}_y{y}_x", f"ctmrg_x{x}_y{(y+1) % Ly}_2"],
+                    name=f"t2_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(edge2[x, y],mean=0,std=1)
+
+                edge3[x, y] = cytnx.UniTensor(
+                    bonds=edge_links,
+                    labels=[f"ctmrg_x{x}_y{y}_3", f"bond_x{x}_y{(y+1) % Ly}_y", f"ctmrg_x{(x+1) % Lx}_y{y}_3"],
+                    name=f"t3_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(edge3[x, y],mean=0,std=1)
+
+                edge4[x, y] = cytnx.UniTensor(
+                    bonds=edge_links,
+                    labels=[f"ctmrg_x{x}_y{(y+1) % Ly}_4", f"bond_x{(x+1) % Lx}_y{y}_x", f"ctmrg_x{x}_y{y}_4"],
+                    name=f"t4_x{x}_y{y}",
+                    rowrank=1)
+                cytnx.random.normal_(edge4[x, y],mean=0,std=1)
+
+        self.corners = [corner1, corner2, corner3, corner4]
+        self.edges = [edge1, edge2, edge3, edge4]
+
+
+    def run_ctmrg_num_of_steps(self, num_of_steps):
+        # TODO: implement
+        pass
 
 
 def contract_small_window(corners, tms, w):
@@ -82,7 +172,7 @@ def contract_small_window(corners, tms, w):
 
 if __name__ == '__main__':
 
-    xi = 7  # CTMRG max bond dimension
+    chi = 7  # CTMRG max bond dimension
     D = 2  # "physical" dimension (PEPS)
 
     t = 1.
@@ -91,7 +181,7 @@ if __name__ == '__main__':
     Lx = 4
     Ly = 3
 
-    # couplings 
+    # random couplings 
     jx = np.random.rand(Lx, Ly)
     jy = np.random.rand(Lx, Ly)
 
@@ -102,106 +192,37 @@ if __name__ == '__main__':
             j = (jx[x][y], jy[x][y], jx[(x + 1) % Lx][y], jy[x][(y + 1) % Ly])
             ten[x, y] = create_ten(t, h, x, Lx, y, Ly, *j)
     
-    corner1 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
-    corner2 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
-    corner3 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
-    corner4 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
+    ctm = CTMRG(chi, ten)
 
-    edge1 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
-    edge2 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
-    edge3 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
-    edge4 = np.empty([Lx, Ly], dtype=cytnx.UniTensor)
+    print("ctm.chi", ctm.chi)
+    print("ctm.D", ctm.D)
+    print("ctm.Lx", ctm.Lx)
+    print("ctm.Ly", ctm.Ly)
 
-    xi_start = 1
-
-    corner_links = [cytnx.Bond(dim=xi_start), cytnx.Bond(dim=xi_start)];
-    edge_links = [cytnx.Bond(dim=xi_start), cytnx.Bond(dim=D), cytnx.Bond(dim=xi_start)] 
-    
-    for x in range(Lx):
-        for y in range(Ly):
-
-            corner1[x, y] = cytnx.UniTensor(
-                bonds=corner_links,
-                labels=[f"ctmrg_x{(x+1) % Lx}_y{y}_1", f"ctmrg_x{x}_y{y}_4"], 
-                name=f"c1_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(corner1[x, y],mean=0,std=1)
-
-            corner2[x, y] = cytnx.UniTensor(
-                bonds=corner_links,
-                labels=[f"ctmrg_x{x}_y{y}_2", f"ctmrg_x{x}_y{y}_1"], 
-                name=f"c2_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(corner2[x, y],mean=0,std=1)
-
-            corner3[x, y] = cytnx.UniTensor(
-                bonds=corner_links,
-                labels=[f"ctmrg_x{x}_y{y}_3", f"ctmrg_x{x}_y{(y+1) % Ly}_2"], 
-                name=f"c3_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(corner3[x, y],mean=0,std=1)
-
-            corner4[x, y] = cytnx.UniTensor(
-                bonds=corner_links,
-                labels=[f"ctmrg_x{x}_y{(y+1) % Ly}_4", f"ctmrg_x{(x+1) % Lx}_y{y}_3"], 
-                name=f"c4_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(corner4[x, y],mean=0,std=1)
-
-            edge1[x, y] = cytnx.UniTensor(
-                bonds=edge_links,
-                labels=[f"ctmrg_x{(x+1) % Lx}_y{y}_1", f"bond_x{x}_y{y}_y", f"ctmrg_x{x}_y{y}_1"],
-                name=f"t1_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(edge1[x, y],mean=0,std=1)
-
-            edge2[x, y] = cytnx.UniTensor(
-                bonds=edge_links,
-                labels=[f"ctmrg_x{x}_y{y}_2", f"bond_x{x}_y{y}_x", f"ctmrg_x{x}_y{(y+1) % Ly}_2"],
-                name=f"t2_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(edge2[x, y],mean=0,std=1)
-
-            edge3[x, y] = cytnx.UniTensor(
-                bonds=edge_links,
-                labels=[f"ctmrg_x{x}_y{y}_3", f"bond_x{x}_y{(y+1) % Ly}_y", f"ctmrg_x{(x+1) % Lx}_y{y}_3"],
-                name=f"t3_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(edge3[x, y],mean=0,std=1)
-
-            edge4[x, y] = cytnx.UniTensor(
-                bonds=edge_links,
-                labels=[f"ctmrg_x{x}_y{(y+1) % Ly}_4", f"bond_x{(x+1) % Lx}_y{y}_x", f"ctmrg_x{x}_y{y}_4"],
-                name=f"t4_x{x}_y{y}",
-                rowrank=1)
-            cytnx.random.normal_(edge4[x, y],mean=0,std=1)
-
-    """
     # test 1 - lower left corner of the lattice 
-    c1 = corner1[0, 1]
-    c2 = corner2[1, 1]
-    c3 = corner3[1, 0]
-    c4 = corner4[0, 0]
+    c1 = ctm.corners[0][0, 1]
+    c2 = ctm.corners[1][1, 1]
+    c3 = ctm.corners[2][1, 0]
+    c4 = ctm.corners[3][0, 0]
     res = cytnx.Contracts(TNs = [c1, c2, c3, c4])
     print(res)
-    """
 
-    # labels = corner4[0, 0].labels()
-    # print(labels)
-    
+    labels = ctm.corners[3][0, 0].labels()
+    print(labels)
+
     # test 2 - small window moving over whole lattice 
     for x in range(Lx):
         for y in range(Ly):
 
-            c1 = corner1[x][(y + 2) % Ly]
-            c2 = corner2[(x + 2) % Lx][(y + 2) % Ly]
-            c3 = corner3[(x + 2) % Lx][y]
-            c4 = corner4[x][y]
+            c1 = ctm.corners[0][x][(y + 2) % Ly]
+            c2 = ctm.corners[1][(x + 2) % Lx][(y + 2) % Ly]
+            c3 = ctm.corners[2][(x + 2) % Lx][y]
+            c4 = ctm.corners[3][x][y]
             
-            t1 = edge1[(x + 1) % Lx][(y + 2) % Ly]
-            t2 = edge2[(x + 2) % Lx][(y + 1) % Ly]
-            t3 = edge3[(x + 1) % Lx][y]
-            t4 = edge4[x][(y + 1) % Ly]
+            t1 = ctm.edges[0][(x + 1) % Lx][(y + 2) % Ly]
+            t2 = ctm.edges[1][(x + 2) % Lx][(y + 1) % Ly]
+            t3 = ctm.edges[2][(x + 1) % Lx][y]
+            t4 = ctm.edges[3][x][(y + 1) % Ly]
             
             w = ten[(x + 1) % Lx][(y + 1) % Ly]
             
