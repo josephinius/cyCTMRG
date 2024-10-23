@@ -2,6 +2,10 @@ import cytnx
 import numpy as np
 import math
 
+EPS = 1.e-32
+
+# TODO: change to directed bonds! 
+
 
 """
 
@@ -44,6 +48,130 @@ def create_ten(temperature, field, x, Lx, y, Ly, *j):
                         name=f"ten_x{x}_y{y}",
                         rowrank=2)
     return ten
+
+
+def corner_extension(c, t1, t2, w):
+    """
+    Returns extended corner according to following schema:
+
+       
+       |    |  W
+    T1 |____|____
+       |    |
+       |____|____
+     C      T2
+
+    """
+
+    cp = cytnx.Contracts([t1, c])
+    cp = cytnx.Contracts([cp, t2])
+
+    alist = c.name().split("_")
+    alist[0] += "p"
+    name_new = "_".join(alist)
+
+    cp = cytnx.Contracts([cp, w]).set_name(name_new)
+    return cp
+
+
+def create_upper_half(c1, c2):
+    """
+
+        C1  ____ __......__ ____  C2
+           |    |          |    |
+           |____|__......__|____|
+           |    |          |    |
+           |    |          |    |
+
+    """
+    res = cytnx.Contract(c2, c1).set_rowrank_(2) 
+    return res
+
+
+def create_lower_half(c3, c4):
+    """
+
+           |    |              |    |
+           |____|____......____|____|
+           |    |              |    |
+           |____|____......____|____|
+        C4                            C3
+
+    """
+
+    res = cytnx.Contract(c3, c4).set_rowrank_(2)
+    return res
+
+
+def create_projectors(c1, c2, c3, c4, chi):
+    upper_half = create_upper_half(c1, c2)
+    _, r_up = cytnx.linalg.Qr(upper_half)
+
+    lower_half = create_lower_half(c3, c4)
+    _, r_down = cytnx.linalg.Qr(lower_half)
+
+    r_up.relabel_(0, "r1")
+    r_down.relabel_(0, "r2")
+
+    rr = cytnx.Contract(r_up, r_down).set_rowrank_(1)
+    s, u, vt, s_err = cytnx.linalg.Svd_truncate(rr, keepdim=chi, err=EPS, return_err=1)
+    print("s_err: ", s_err.item())
+
+    cytnx.Pow_(s, -1/2)
+    cytnx.Conj_(u)
+
+    u = cytnx.Contract(u, s)
+
+    cytnx.Conj_(vt)
+    vt = cytnx.Contract(s, vt)
+
+    upper_projector = cytnx.Contract(r_down, vt).set_rowrank_(2)
+    lower_projector = cytnx.Contract(r_up, u).set_rowrank_(2)
+
+    lab = upper_projector.labels()
+    # print("lab: ", lab)
+
+    new_coordinates = None
+    old_coordinates = None
+    ctrmg_dir = None
+
+    for l in lab:
+        if l.startswith("bond"):
+            alist = l.split("_")
+            new_coordinates = alist[1:3]
+        if l.startswith("ctmrg"):
+            alist = l.split("_")
+            old_coordinates = alist[1:3]
+            ctrmg_dir = alist[-1]
+
+    new_lab = ["ctrmg"] + new_coordinates + [ctrmg_dir]
+    new_lab = "_".join(new_lab) 
+    # print(new_lab) 
+
+    upper_projector.relabel_("_aux_L", new_lab)
+    lower_projector.relabel_("_aux_R", new_lab)
+
+    upper_projector.set_name("proj_upper_" + "_".join(old_coordinates))
+    lower_projector.set_name("proj_lower_" + "_".join(old_coordinates))
+
+    # print(upper_projector.name())
+    # print(lower_projector.name())
+
+    return upper_projector, lower_projector
+
+
+def create_projectors_from_weights(chi, corners, edges, weights):
+
+    c1, c2, c3, c4 = corners
+    t11, t12, t21, t22, t31, t32, t41, t42 = edges
+    w1, w2, w3, w4 = weights
+
+    c1p = corner_extension(c1, t11, t42, w1)
+    c2p = corner_extension(c2, t21, t12, w2)
+    c3p = corner_extension(c3, t31, t22, w3)
+    c4p = corner_extension(c4, t41, t32, w4)
+
+    return create_projectors(c1p, c2p, c3p, c4p, chi)
 
 
 class CTMRG(object):
@@ -134,9 +262,42 @@ class CTMRG(object):
         self.edges = [edge1, edge2, edge3, edge4]
 
 
+    def select_corners_and_edges(self, x, y):
+        
+        lx, ly = self.Lx, self.Ly
+
+        c1 = self.corners[0][x, (y + 3) % ly]
+        c2 = self.corners[1][(x + 3) % lx][(y + 3) % ly]
+        c3 = self.corners[2][(x + 3) % lx, y]
+        c4 = self.corners[3][x, y]
+
+        t11 = self.edges[0][(x + 1) % lx, (y + 3) % ly]
+        t12 = self.edges[0][(x + 2) % lx, (y + 3) % ly]
+
+        t21 = self.edges[1][(x + 3) % lx, (y + 2) % ly]
+        t22 = self.edges[1][(x + 3) % lx, (y + 1) % ly]
+
+        t31 = self.edges[2][(x + 2) % lx, y]
+        t32 = self.edges[2][(x + 1) % lx, y] 
+
+        t41 = self.edges[3][x, (y + 1) % ly]
+        t42 = self.edges[3][x, (y + 2) % ly]
+
+        return (c1, c2, c3, c4), (t11, t12, t21, t22, t31, t32, t41, t42)
+
+
     def run_ctmrg_num_of_steps(self, num_of_steps):
-        # TODO: implement
-        pass
+        
+        lx, ly = self.Lx, self.Ly
+
+        x, y = 0, 0
+
+        cc, tt = self.select_corners_and_edges(x, y)
+
+        ww = (self.weights[(x + 1) % lx][(y + 2) % ly], self.weights[(x + 2) % lx][(y + 2) % ly], 
+              self.weights[(x + 2) % lx][(y + 1) % ly], self.weights[(x + 1) % lx][(y + 1) % ly])
+        
+        p_up, p_down = create_projectors_from_weights(self.chi, cc, tt, ww)
 
 
 def contract_small_window(corners, tms, w):
@@ -178,8 +339,8 @@ if __name__ == '__main__':
     t = 1.
     h = 0.
 
-    Lx = 4
-    Ly = 3
+    Lx = 5
+    Ly = 5
 
     # random couplings 
     jx = np.random.rand(Lx, Ly)
@@ -230,3 +391,5 @@ if __name__ == '__main__':
             tms = (t1, t2, t3, t4)
             res = contract_small_window(corners, tms, w)
             print("x:", x, "y: ", y, "res: ", res)
+
+    ctm.run_ctmrg_num_of_steps(0)
