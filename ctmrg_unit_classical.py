@@ -4,8 +4,6 @@ import math
 
 EPS = 1.e-32
 
-# TODO: change to directed bonds! 
-
 
 """
 
@@ -24,29 +22,39 @@ ten_{a b c d}
 
 Labels:
 
-a: f"bond_x{x}_y{y}_x"
-b: f"bond_x{x}_y{y}_y"
-c: f"bond_x{x+1}_y{y}_x"
-d: f"bond_x{x}_y{y+1}_y"
+a: f"bond_x{x}_y{y}_x" (ket)
+b: f"bond_x{x}_y{y}_y" (ket)
+c: f"bond_x{x+1}_y{y}_x" (bra)
+d: f"bond_x{x}_y{y+1}_y" (bra)
 
 """
 
 def create_ten(temperature, field, x, Lx, y, Ly, *j):
+
     weights = []
+    
     for coupling in j:
         b = coupling / temperature
         c = math.sqrt(math.cosh(b))
         s = math.sqrt(math.sinh(b))
         w = [[c, s], [c, -s]]
         weights.append(np.array(w))
+    
     wf = np.array([math.exp(field / temperature), math.exp(-field / temperature)])
     # tensor_{i, j, k, l} = sum_{a} w[a][i] * w[a][j] * w[a][k] * w[a][l] * wf[a]
     tensor = np.einsum('ai,aj,ak,al,a->ijkl', *weights, wf)
     tensor = cytnx.from_numpy(tensor)
-    ten = cytnx.UniTensor(tensor, 
-                        labels=[f"bond_x{x}_y{y}_x", f"bond_x{x}_y{y}_y", f"bond_x{(x+1) % Lx}_y{y}_x", f"bond_x{x}_y{(y+1) % Ly}_y"], 
-                        name=f"ten_x{x}_y{y}",
-                        rowrank=2)
+
+    linktypes = [cytnx.BD_KET, cytnx.BD_KET, cytnx.BD_BRA, cytnx.BD_BRA]
+    links = [cytnx.Bond(bond_type=linktype, dim=2) for linktype in linktypes]
+
+    ten = cytnx.UniTensor(bonds=links, 
+                          labels=[f"bond_x{x}_y{y}_x", f"bond_x{x}_y{y}_y", f"bond_x{(x+1) % Lx}_y{y}_x", f"bond_x{x}_y{(y+1) % Ly}_y"], 
+                          name=f"ten_x{x}_y{y}", 
+                          rowrank=2)
+    
+    ten.get_block_()[:] = tensor
+
     return ten
 
 
@@ -103,6 +111,24 @@ def create_lower_half(c3, c4):
     return res
 
 
+def redirect_bond(uten, label):
+    bonds = uten.bonds()
+    for i, bond in enumerate(bonds):
+        if uten.labels()[i] == label:
+            bond.redirect_()
+            break
+
+
+def set_bond(uten, label, bond_type):
+    print(uten.name())
+    bonds = uten.bonds()
+    for i, bond in enumerate(bonds):
+        if uten.labels()[i] == label:
+            if bond.type() != bond_type:
+                bond.redirect_()
+            break
+
+
 def create_projectors(c1, c2, c3, c4, chi):
     upper_half = create_upper_half(c1, c2)
     _, r_up = cytnx.linalg.Qr(upper_half)
@@ -125,17 +151,27 @@ def create_projectors(c1, c2, c3, c4, chi):
     cytnx.Conj_(vt)
     vt = cytnx.Contract(s, vt)
 
+    redirect_bond(vt, "r2")
+    redirect_bond(u, "r1")
+
     upper_projector = cytnx.Contract(r_down, vt).set_rowrank_(2)
     lower_projector = cytnx.Contract(r_up, u).set_rowrank_(2)
 
-    lab = upper_projector.labels()
-    # print("lab: ", lab)
+    upper_ctmrg_type = None 
+    for i, l in enumerate(upper_projector.labels()):
+        if l.startswith("ctmrg"):
+            upper_ctmrg_type = upper_projector.bonds()[i].type()
+
+    lower_ctmrg_type = None 
+    for i, l in enumerate(lower_projector.labels()):
+        if l.startswith("ctmrg"):
+            lower_ctmrg_type = lower_projector.bonds()[i].type()
 
     new_coordinates = None
     old_coordinates = None
     ctrmg_dir = None
 
-    for l in lab:
+    for l in upper_projector.labels():
         if l.startswith("bond"):
             alist = l.split("_")
             new_coordinates = alist[1:3]
@@ -146,16 +182,15 @@ def create_projectors(c1, c2, c3, c4, chi):
 
     new_lab = ["ctrmg"] + new_coordinates + [ctrmg_dir]
     new_lab = "_".join(new_lab) 
-    # print(new_lab) 
 
     upper_projector.relabel_("_aux_L", new_lab)
     lower_projector.relabel_("_aux_R", new_lab)
 
+    set_bond(lower_projector, new_lab, upper_ctmrg_type)
+    set_bond(upper_projector, new_lab, lower_ctmrg_type)
+
     upper_projector.set_name("proj_upper_" + "_".join(old_coordinates))
     lower_projector.set_name("proj_lower_" + "_".join(old_coordinates))
-
-    # print(upper_projector.name())
-    # print(lower_projector.name())
 
     return upper_projector, lower_projector
 
@@ -196,9 +231,13 @@ class CTMRG(object):
 
         xi_start = 1
 
-        corner_links = [cytnx.Bond(dim=xi_start), cytnx.Bond(dim=xi_start)]
-        edge_links = [cytnx.Bond(dim=xi_start), cytnx.Bond(dim=D), cytnx.Bond(dim=xi_start)] 
-        
+        corner_links = [cytnx.Bond(bond_type=cytnx.BD_BRA, dim=xi_start), cytnx.Bond(bond_type=cytnx.BD_KET, dim=xi_start)]
+
+        edge1_links = [cytnx.Bond(bond_type=cytnx.BD_BRA, dim=xi_start), cytnx.Bond(bond_type=cytnx.BD_KET, dim=D), cytnx.Bond(bond_type=cytnx.BD_KET, dim=xi_start)] 
+        edge2_links = [cytnx.Bond(bond_type=cytnx.BD_BRA, dim=xi_start), cytnx.Bond(bond_type=cytnx.BD_KET, dim=D), cytnx.Bond(bond_type=cytnx.BD_KET, dim=xi_start)] 
+        edge3_links = [cytnx.Bond(bond_type=cytnx.BD_BRA, dim=xi_start), cytnx.Bond(bond_type=cytnx.BD_BRA, dim=D), cytnx.Bond(bond_type=cytnx.BD_KET, dim=xi_start)] 
+        edge4_links = [cytnx.Bond(bond_type=cytnx.BD_BRA, dim=xi_start), cytnx.Bond(bond_type=cytnx.BD_BRA, dim=D), cytnx.Bond(bond_type=cytnx.BD_KET, dim=xi_start)] 
+
         for x in range(Lx):
             for y in range(Ly):
 
@@ -231,28 +270,28 @@ class CTMRG(object):
                 cytnx.random.normal_(corner4[x, y],mean=0,std=1)
 
                 edge1[x, y] = cytnx.UniTensor(
-                    bonds=edge_links,
+                    bonds=edge1_links,
                     labels=[f"ctmrg_x{(x+1) % Lx}_y{y}_1", f"bond_x{x}_y{y}_y", f"ctmrg_x{x}_y{y}_1"],
                     name=f"t1_x{x}_y{y}",
                     rowrank=1)
                 cytnx.random.normal_(edge1[x, y],mean=0,std=1)
 
                 edge2[x, y] = cytnx.UniTensor(
-                    bonds=edge_links,
+                    bonds=edge2_links,
                     labels=[f"ctmrg_x{x}_y{y}_2", f"bond_x{x}_y{y}_x", f"ctmrg_x{x}_y{(y+1) % Ly}_2"],
                     name=f"t2_x{x}_y{y}",
                     rowrank=1)
                 cytnx.random.normal_(edge2[x, y],mean=0,std=1)
 
                 edge3[x, y] = cytnx.UniTensor(
-                    bonds=edge_links,
+                    bonds=edge3_links,
                     labels=[f"ctmrg_x{x}_y{y}_3", f"bond_x{x}_y{(y+1) % Ly}_y", f"ctmrg_x{(x+1) % Lx}_y{y}_3"],
                     name=f"t3_x{x}_y{y}",
                     rowrank=1)
                 cytnx.random.normal_(edge3[x, y],mean=0,std=1)
 
                 edge4[x, y] = cytnx.UniTensor(
-                    bonds=edge_links,
+                    bonds=edge4_links,
                     labels=[f"ctmrg_x{x}_y{(y+1) % Ly}_4", f"bond_x{(x+1) % Lx}_y{y}_x", f"ctmrg_x{x}_y{y}_4"],
                     name=f"t4_x{x}_y{y}",
                     rowrank=1)
